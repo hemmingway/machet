@@ -1,0 +1,147 @@
+# This is a TOML document. Boom.
+
+title = "Digital Disign Flow Example"
+
+[owner]
+mode = FPGA			# SIM or FPGA
+# Name of the implementation. Used to name all scripts and compile results
+implementation_name = test_project
+sim_tool = modelsim			# icarus, modelsim, ghdl. 
+fpga_tool = quartus			# XST, Quartus, Vivado
+sim_top_level = test_top
+fpga_top_level = sim_top
+
+# Has to be in a format the FPGA toolchain understands
+# Example:
+# xc4vfx12-ff668-10
+# xc3s200-ft256-4
+# xc2v6000-ff1517-4
+# ep3c16f484c6
+fpga_part = ep3c16f484c6
+
+
+
+# May point to directories or file, relative to project base directory
+source_paths =
+
+# Source files that are used for simulation only
+# May point to directories or file, relative to project base directory
+sim_source_paths
+
+# Source files that are used for FPGA implementation only
+# May point to directories or file, relative to project base directory
+fpga_source_paths
+
+
+
+# May point to directories only, relative to project base directory
+include_paths
+
+# May point to files only, relative to project base directory
+sim_excluded_files
+
+
+# May point to files only, relative to project base directory
+fpga_excluded_files
+
+
+
+# Global defines in Verilog syntax.
+verilog_defines
+
+# Defines used for simulation only
+sim_verilog_defines
+
+# Defines used for FPGA implementation only
+fpga_verilog_defines
+
+
+
+
+xilinx_syn_constraint_files {
+    # .xcf and .ucf files for synthesis part of Xilinx FPGA tools
+    # May point to files only, relative to project base directory
+}
+
+xilinx_par_constraint_files {
+    # .ucf files for place and route part of Xilinx FPGA tools
+    # May point to files only, relative to project base directory
+}
+
+xilinx_xst_options {
+    # Any option that XST understands
+    -rtlview yes
+}
+
+xilinx_ngdbuild_options {
+    # Any option that NGDBUILD understands
+}
+
+xilinx_map_options {
+    # Any option that MAP understands
+}
+
+xilinx_par_options {
+    # Any option that PAR understands
+}
+
+xilinx_bitgen_options {
+    # Any option that BITGEN understands
+    -g StartUpClk:JtagClk
+}
+
+xilinx_trace_options {
+    # Any option that TRCE understands
+}
+
+altera_constraint_files {
+    # .tcl files for synthesis part of Altera FPGA tools
+    # File content will be added to Altera project file
+    # May point to files only, relative to project base directory
+}
+
+altera_sdc_files {
+    # .sdc files used by TimeQuest timing analyzer
+    # May point to files only, relative to project base directory
+}
+
+modelsim_vlog_options {
+    # Any option that ModelSim vlog understands
+    #-timescale "1ns/1ns"
+    -novopt
+    -source
+}
+
+modelsim_vcom_options {
+    # Any option that ModelSim vcom understands
+    -novopt
+   -source
+}
+
+modelsim_vsim_options {
+    # Any option that ModelSim vsim understands
+    -novopt
+}
+
+icarus_iverilog_options {
+    # Any option that Icarus iverilog compiler understands
+}
+
+icarus_vvp_options {
+    # Any option that Icarus vvp simulator understands
+}
+
+ghdl_compile_options {
+    # Any option that the GHDL compiler understands
+    --ieee=synopsys
+    # -fexplicit
+}
+
+ghdl_run_options {
+    # Any option that a GHDL simulation executable understands
+    #--stop-time=1ms
+}
+
+
+
+

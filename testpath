@@ -1,0 +1,80 @@
+#!/usr/bin/perl -w
+
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+use lib "$RealBin";
+
+use Path::Tiny;
+
+ 
+# creating Path::Tiny objects
+ 
+$dir = path("/tmp");
+$foo = path("foo.txt");
+
+if($dir->is_dir) {
+	print "$dir is a directory\n";
+} 
+
+$subdir = $dir->child("foo");
+$bar = $subdir->child("bar.txt");
+ 
+# stringifies as cleaned up path
+ 
+$file = path("./foo.txt");
+print $file; # "foo.txt"
+print "\n";
+ 
+# reading files
+ 
+$guts = $file->slurp;
+$guts = $file->slurp_utf8;
+ 
+@lines = $file->lines;
+@lines = $file->lines_utf8;
+ 
+($head) = $file->lines( {count => 1} );
+($tail) = $file->lines( {count => -1} );
+ 
+# writing files
+ 
+$bar->spew( @data );
+$bar->spew_utf8( @data );
+ 
+$bar->spew_utf8( @lines );
+
+
+# reading directories
+ 
+for ( $dir->children ) {  }
+ 
+$iter = $dir->iterator;
+while ( my $next = $iter->() ) {  
+	if($next->is_dir) {
+		print "$next is a directory\n";
+	}
+	if($next->is_file) {
+		print "$next is a file\n";
+	} 
+}
+
+
+# 测试删除
+$testdir = path("/home/nfs/work_fpga/machet/test");
+$iter = $testdir->iterator;
+while ( my $next = $iter->() ) {
+	# Item is directory
+	if ($next->exists) {
+		print "Delete ".$next."\n";
+		$next->remove_tree( { safe => 0 });
+    }
+}
+
+
+
+
+
+
+
+
+

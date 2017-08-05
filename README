@@ -1,0 +1,25 @@
+MACHET DIGITAL DESIGN FLOW script collection
+Copyright (C) 2017  Wang xingfeng (hemminghway@163.com)
+
+This directory contains sources for a digital design flow script.
+
+
+
+
+
+Release notes:
+
+0.5.1
+Fixed a big typo in the configuration file setting names. Why didn't anybody 
+tell me that the plural of path is paths and not pathes...? And why did I not 
+see this for over one year? Embarrassing!
+
+0.5.0
+First public release of working code. 
+Supported third party software:
+ - Icarus Verilog
+ - GHDL (Linux only)
+ - ModelSim
+ - Xilinx ISE/Vivado (FPGAs only, not for CPLDs)
+ - Altera Quartus II/Quartus Prime (not tested very well)
+ - Synoplify

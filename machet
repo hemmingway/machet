@@ -1,0 +1,916 @@
+#!/usr/bin/perl -w
+#
+# File       : machet
+# Author     : wangxf
+# Company    : CPUxOS
+# Description: 
+# Revisions  :
+#
+# Date        Author           Description
+# 2017-07-24  wangxf           Created
+#
+#
+#
+
+eval 'exec /usr/bin/perl -w -S $0 ${1+"$@"}'
+    if 0; # not running under some shell
+# See copyright, etc in below POD section.
+######################################################################
+
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+use lib "$RealBin";
+
+
+use Getopt::Long;
+use IO::File;
+use Pod::Usage;
+use Cwd;
+
+use Path::Tiny;
+use TOML::Parser 0.03;
+use Machet::Utils qw(from_toml to_toml);
+use Machet::Quartus;
+use strict;
+use vars qw ($Debug $VERSION);
+
+
+$VERSION = "0.6.2";
+
+
+# ------------------------------------------------------------------------------
+# main
+
+# Variable declaration
+$Debug = 0;
+
+our $MODE;                    # Selected mode (SIM ord FPGA)
+our $VERBOSE = 1;             # Enable full comments
+our $TOOL_OVERRIDE = '';      # Override tool from config file
+our $CFG_OVERRIDE = '';       # Override standard config file
+our $CLEAN = 0;               # Command line option to clean up
+our $CLEANONLY = 0;           # Set if only clean has been selected from command line
+our $DRY = 0;                 # Perform dry run only, creates only scripts
+
+our $SYN_OPT = 0;             # Command line option for synthesis is set
+our $PAR_OPT = 0;             # Command line option for place and route is set
+our $TIMING_OPT = 0;          # Command line option for timing analysis is set
+our $SYN = 0;                 # Flag for synthesis is set
+our $PAR = 0;                 # Flag for place and route is set
+our $TIMING = 0;              # Flag for timing analysis is set
+
+our $TESTLIST_OPT = 0;        # Command line option for displaying testcase list
+our $TESTCASE_OPT = '';       # Name of selected testcase from command line
+our $COM_OPT = 0;             # Command line option for simulation compile run
+our $RUN_OPT = 0;             # Command line option for simulation start
+our $INTER_OPT = 0;           # Command line option for interactive simulation
+our $NODUMP_OPT = 0;          # Command line option to disable value change dumps in simulation
+our $WAVE_OPT = 0;            # Command line option to display waveform
+our $TESTLIST = 0;            # Flag for displaying testcase list
+our $TESTCASE = '';           # Name of selected testcase
+our $COM = 0;                 # Flag for simulation compile run
+our $ELAB = 0;                # Flag for simulation elaboration
+our $RUN = 0;                 # Flag for simulation start
+our $INTER = 0;               # Flag for interactive simulation
+our $NODUMP = 0;              # Flag to disable value change dumps in simulation
+our $WAVE = 0;                # Flag to display waveform
+
+
+our $PROJECTBASE;             # Base directory of project
+our $TOOL;                    # Used toolchain
+our $IMP_NAME;                # Implementation name
+
+our $SOURCE_PATHS;            # List of source file locations (pointing to file or directory)
+our $ADDSOURCE_PATHS;         # List of additional source paths for SIM or FPGA
+
+our $INCLUDE_PATHS;           # List of include paths
+
+our $VERILOG_DEFINES;         # Verilog defines used for all files
+our $ADDVERILOG_DEFINES;      # List of additional defines for SIM or FPGA
+our $EXCLUDED_FILES;          # Files excluded for FPGA or SIM run (pointing to files directly)
+our $TOPLEVEL;                # Top level module name for FPGA or SIM run
+our $FPGAPART;                # Part type of target FPGA
+our $XIL_SYNCONSTRAINT_FILES; # List of synthesis constraint files for FPGA run (pointing to files directly)
+our $XIL_PARCONSTRAINT_FILES; # List of par constraint files for FPGA run (pointing to files directly)
+our $XIL_XSTOPTIONS;          # Options to parse to XST during synthesis
+our $XIL_NGDBUILDOPTIONS;     # Options to parse to NGDBUILD during mapping
+our $XIL_MAPOPTIONS;          # Options to parse to MAP during mapping
+our $XIL_PAROPTIONS;          # Options to parse to PAR during mapping
+our $XIL_BITGENOPTIONS;       # Options to parse to BITGEN
+our $XIL_TRACEOPTIONS;        # Options to parse to TRACE
+our $ALT_CONSTRAINT_FILES;    # List of constraints files for Altera FPGA flow
+our $ALT_SDC_FILES;           # List of constraints files for Altera timing analysis
+our $MSIM_VLOGOPTIONS;        # Options to parse to ModelSim vlog compilers
+our $MSIM_VCOMOPTIONS;        # Options to parse to ModelSim vcom compilers
+our $MSIM_VSIMOPTIONS;        # Options to parse to ModelSim vsim simulator
+our $ICAR_IVERILOGOPTIONS;    # Options to parse to IVERILOG compiler
+our $ICAR_VVPOPTIONS;         # Options to parse to VVP simulator
+our $GHDL_COMOPTIONS;         # Options to parse to GHDL compiler
+our $GHDL_RUNOPTIONS;         # Options to parse to GHDL for simulation run
+
+our @SOURCEFILE_LIST;         # Complete list of all source files with absolute path
+
+# Config
+my $CFGNAME = '';           # Name of config file
+my $data;					# parser result of toml config file(HASH)
+
+my @opt_files;				#
+my $ret = 1;                # Return code of toolchain
+
+
+autoflush STDOUT 1;
+autoflush STDERR 1;
+
+
+# ------------------------------------------------------------------------------
+# First step: evaluate command line options
+
+Getopt::Long::config ("no_auto_abbrev","pass_through");
+GetOptions ("debug" => \&debug);  # Snarf --debug ASAP, before parse -f files
+
+# $Opt = new Verilog::Getopt();
+# @ARGV = $Opt->parameter(@ARGV);	# Strip -y, +incdir+, etc
+Getopt::Long::config ("no_auto_abbrev","no_pass_through");
+if (! GetOptions(
+			"help|h"       => \&usage,
+			"debug"       => \&debug,
+            "verbose"    => \$VERBOSE,
+            "clean"        => \$CLEAN,
+            "dry"        => \$DRY,
+            "file"     => \$CFG_OVERRIDE,
+            "tool"     => \$TOOL_OVERRIDE,
+            "synthesis"  => \$SYN_OPT,
+            "par|p"        => \$PAR_OPT,
+            "timing|t"     => \$TIMING_OPT,
+            "testlist|L"   => \$TESTLIST_OPT,
+            "testcase|C=s" => \$TESTCASE_OPT,
+            "compile"    => \$COM_OPT,
+            "run|r"        => \$RUN_OPT,
+            "inter|I"      => \$INTER_OPT,
+            "nodump|N"     => \$NODUMP_OPT,
+            "wave|W"       => \$WAVE_OPT,
+            "version"    => sub { print "Version $VERSION\n"; exit(0); },
+		  	"<>"		=> \&parameter,
+            )) {
+    die "%Error: Bad usage, try 'machet --help'\n";
+}
+
+
+# project base directory, 这个通过参数获取
+$PROJECTBASE = "";  # getProjectBase();
+
+# 默认当做在指定目录下面的 machet.toml
+#if ($CFG_OVERRIDE eq '') {
+#	$CFGNAME = convPath(getDefaultCfgLocation());
+#}
+#else {
+#	$CFGNAME = convPath(clean_path($CALLDIR."/".$CFG_OVERRIDE)); 
+#}
+
+
+# ------------------------------------------------------------------------------
+# Second step: read config file and extract data
+
+print ">>> Reading config file\n";
+
+# Parsing toml
+my $file = path("fpga.toml");
+if($file->is_file) {
+
+	$data = from_toml($file->slurp);
+
+	print ">>> \$data " . $data . "\n";
+
+} else {
+	# Create new file
+	write_config_file("demo.toml");
+	exit(0);
+}
+
+# Extract data from config file
+$MODE 				= $data->{'base'}{'mode'};
+$IMP_NAME 			= $data->{'base'}{'name'};
+#$IMP_NAME 			= "debug";
+$TOOL 				= $data->{'base'}{'toolchain'};
+$TOPLEVEL 			= $data->{'base'}{'top_level'};
+$FPGAPART 			= $data->{'base'}{'part'};
+$SOURCE_PATHS 		= $data->{'paths'}{'source'};		#
+$INCLUDE_PATHS 		= $data->{'paths'}{'include'};		#
+$VERILOG_DEFINES 	= $data->{'defines'}{'verilog'};	#
+if ($MODE eq "SIM") {
+  	$ADDSOURCE_PATHS         = $data->{''}{''};
+  	$EXCLUDED_FILES           = $data->{''}{''};
+  	$ADDVERILOG_DEFINES       = $data->{''}{''};
+
+  	$MSIM_VLOGOPTIONS         = $data->{''}{''};
+  	$MSIM_VCOMOPTIONS         = $data->{''}{''};
+  	$MSIM_VSIMOPTIONS         = $data->{''}{''};
+  	$ICAR_IVERILOGOPTIONS     = $data->{''}{''};
+  	$ICAR_VVPOPTIONS          = $data->{''}{''};
+  	$GHDL_COMOPTIONS          = $data->{''}{''};
+  	$GHDL_RUNOPTIONS          = $data->{''}{''};
+}
+elsif ($MODE eq "FPGA") {
+  	$ADDSOURCE_PATHS         = $data->{'paths'}{'fpga_source'};
+  	$EXCLUDED_FILES           = $data->{'paths'}{'fpga_excluded'};
+  	$ADDVERILOG_DEFINES       = $data->{'defines'}{'fpga_verilog'};
+
+  	$XIL_XSTOPTIONS           = $data->{''}{''};
+  	$XIL_NGDBUILDOPTIONS      = $data->{''}{''};
+  	$XIL_MAPOPTIONS           = $data->{''}{''};
+  	$XIL_PAROPTIONS           = $data->{''}{''};
+  	$XIL_BITGENOPTIONS        = $data->{''}{''};
+  	$XIL_TRACEOPTIONS         = $data->{''}{''};
+  	$XIL_SYNCONSTRAINT_FILES  = $data->{''}{''};
+  	$XIL_PARCONSTRAINT_FILES  = $data->{''}{''};
+  	$ALT_CONSTRAINT_FILES     = $data->{''}{''};
+  	$ALT_SDC_FILES            = $data->{''}{''};
+}
+
+
+
+
+# Set/reset options based on combination of options
+# For FPGA mode
+if ($MODE eq "FPGA") {
+	$SYN    = $SYN_OPT;
+	$PAR    = $PAR_OPT;
+  	$TIMING = $TIMING_OPT;
+
+  	# Check if any FPGA options have been specified
+  	if (($SYN == 0) && ($PAR == 0) && ($TIMING == 0)) {
+    	# Clean has been specified so just do a cleanup
+    	if ($CLEAN == 1) {
+      		$CLEANONLY = 1;
+    	}
+    	# Perform full run
+    	else {
+      		$SYN = 1;
+      		$PAR = 1;
+      		$TIMING = 1;
+    	}
+  	}
+}
+# For SIM mode
+elsif ($MODE eq "SIM") {
+	$TESTLIST = $TESTLIST_OPT;
+  	# Set other options only if Testlist has not been chosen
+  	unless ($TESTLIST == 1) {
+  		$TESTCASE = $TESTCASE_OPT;
+    	$COM      = $COM_OPT;
+    	$RUN      = $RUN_OPT;
+    	$INTER    = $INTER_OPT;
+    	$NODUMP   = $NODUMP_OPT;
+    	$WAVE     = $WAVE_OPT;
+  	}
+  	# Check if any simulation options have been specified
+  	if (($COM == 0) && ($RUN == 0) && ($WAVE == 0)) {
+    	# Clean has been specified so just do a cleanup
+    	if ($CLEAN == 1) {
+      		$CLEANONLY = 1;
+    	}
+    	# Full run
+    	else {
+      		$COM = 1;
+      		$RUN = 1;
+    	}
+  	}
+  	# Disable batch and interactive switches if run has not been selected
+  	if ($RUN == 0) {
+    	$INTER = 0;
+  	}
+}
+
+
+
+# 打印信息
+printf ("  Project base directory: \"%s\"\n", $PROJECTBASE);
+printf ("  Script startet in %s mode\n", $MODE);
+
+if ($CLEAN == 1) {
+	print "    - Cleaning up files\n";
+}
+if ($DRY == 1) {
+	print "    - Dry run only\n";
+}
+
+# FPGA options
+if ($SYN == 1) {
+	print "    - FPGA synthesis\n";
+}
+if ($PAR == 1) {
+	print "    - FPGA place and route\n";
+}
+if ($TIMING == 1) {
+	print "    - FPGA timing analysis\n";
+}
+
+# SIM options
+if ($COM == 1) {
+	print "    - Compiling simulation files\n";
+}
+#if ($ELAB == 1) {
+#  	print "    - Starting elaboration\n";
+#}
+if ($RUN == 1) {
+	print "    - Starting ";
+  	if ($INTER == 1) {
+    	print "interactive ";
+  	}
+  	else {
+    	print "batch ";
+  	}
+  	print "simulation";
+  	if ($NODUMP == 1) {
+    	print " (waveform dump disabled)";
+  	}
+  	print "\n";
+}
+if ($WAVE == 1) {
+  	print "    - Diplaying waveform\n";
+}
+if ($TESTLIST == 1) {
+  	print "    - Displaying testcase list\n";
+}
+
+
+# Check if --clean has been specified
+if ($CLEAN == 1) {
+	# Start clean subroutine
+  	clean_up();
+  	# Exit if no other option has been selected
+  	if ($CLEANONLY == 1) {
+    	exit(0);
+  	}
+}
+
+# Check if --testlist has been specified
+if ($TESTLIST == 1) {
+	display_test_list();
+  	exit(0);
+}
+
+
+
+# Append additional sources to regular sources
+print "    - Collecte \$SOURCE_PATHS\n";
+foreach (@{$ADDSOURCE_PATHS}) {
+	push(@{$SOURCE_PATHS}, $_);
+   	printf ("\t%s\n", $_);	# debug
+}
+
+# Append additional defines to regular defines
+print "    - Collecte \$VERILOG_DEFINES\n";
+foreach (@{$ADDVERILOG_DEFINES}) {
+	push(@{$VERILOG_DEFINES}, $_);
+   	printf ("\t%s\n", $_);	# debug
+}
+
+# Override tool selection
+if ($TOOL_OVERRIDE ne '') {
+	$TOOL = $TOOL_OVERRIDE;
+}
+
+# Check if only 1 implementation is specified
+if (!$IMP_NAME) {
+	print "ERROR: ".$IMP_NAME."implementation names specified.\n";
+  	exit(-1);
+}
+elsif ($VERBOSE == 1) {
+	print "  Using implementation \"$IMP_NAME\"\n";
+}
+
+# Check if only 1 toplevel is specified
+if (!$TOPLEVEL) {
+	print "ERROR: ".$TOPLEVEL."top level modules specified.\n";
+  	exit(-1);
+}
+elsif ($VERBOSE == 1) {
+  	print "  Using top level \"$TOPLEVEL\"\n";
+}
+
+
+if ($MODE eq "SIM") {
+  	# Check if tool has been specified
+  	if (!$TOOL) {
+    	print "ERROR: ".$TOOL." simulation tools specified.\n";
+    	exit(-1);
+ 	}
+
+  	if ($VERBOSE == 1) {
+    	print "  Using simulation toolchain \"$TOOL\"\n";
+  	}
+}
+
+if ($MODE eq "FPGA") {
+  	# Check if tool has been specified
+  	if (!$TOOL) {
+    	print "ERROR: ".$TOOL." FPGA tools specified.\n";
+    	exit(-1);
+  	}
+
+  	# Check if only 1 FPGA part is specified
+  	if (!$FPGAPART) {
+    	print "ERROR: ".$FPGAPART." FPGA parts specified.\n";
+    	exit(-1);
+  	}
+
+  	if ($VERBOSE == 1) {
+    	print "  Using FPGA toolchain \"$TOOL\"\n";
+   		print "  Using FPGA part \"$FPGAPART\"\n";
+  	}
+}
+
+
+# ------------------------------------------------------------------------------
+# Third step: build file list
+
+print ">>> Building source file list and excluding files\n";
+
+
+# Check if entries in array point to file or to directory
+foreach (@{$SOURCE_PATHS}) {
+	my 	$currentPath;
+
+  	# Fix it!!! Expand to absolute path
+  	my $currentEntry = $_;
+
+  	# Check if entry points to directory
+	my $item = path($currentEntry);
+  	if ($item->is_dir) {
+    	# Open directory, read content and check if it is a file
+		my $iter = $item->iterator;
+    	while ( my $next = $iter->() ) {
+      		# Check if it is a file
+      		if ($next->is_file) {
+        		push(@SOURCEFILE_LIST, $next);
+      		}
+    	}
+  	}
+  	elsif ($item->is_file) {
+    	push(@SOURCEFILE_LIST, $currentEntry);
+  	}
+  	else {
+    	printf ("Warning: \"%s\" does not exist\n", $currentEntry);
+  	}
+}
+
+# Step through through list of excluded files
+foreach (@{$EXCLUDED_FILES}) {
+  	# Fix it!!! and expand to absolute path
+  	my $currentPath = $_;
+
+  	# Check if file to exclude exists
+	my $item = path($currentPath);
+  	if ($item->exists) {
+    	foreach (1..@SOURCEFILE_LIST) {
+      		# Remove first entry from source file list
+     		my $line = shift(@SOURCEFILE_LIST);
+      		# If current source file is not a file to exclude put it back at end of source file list
+      		if (lc($currentPath) ne lc($line)) {
+        		push(@SOURCEFILE_LIST, $line);
+      		}
+    	}
+  	}
+  	else {
+    	printf ("Warning: \"%s\" does not exist\n", $currentPath);
+  	}
+}
+
+# Report
+if ($VERBOSE == 1) {
+	print "  Source file list:\n";
+  	foreach (@SOURCEFILE_LIST) {
+    	printf ("    %s\n", $_);
+  	}
+}
+
+
+
+# ------------------------------------------------------------------------------
+# Fourth step: check if include paths exist
+
+print ">>> Checking include paths\n";
+
+
+foreach (1..@{$INCLUDE_PATHS}) {
+	# Get first entry from list
+  	my $line = shift(@{$INCLUDE_PATHS});
+
+  	# Fixed it!!! Expand to absolute path
+  	# $line = $line;
+
+  	# Check if entry points to directory and put entry with full path back to list, else remove from list
+	my $item = path($line);  	
+	if ($item->is_dir) {
+    	push(@{$INCLUDE_PATHS}, $line);
+  	}
+  	else {
+    	printf ("Warning: \"%s\" is no valid include path\n", $line);
+  	}
+}
+
+# Report
+if ($VERBOSE == 1) {
+  	print "  Include paths:\n";
+  	foreach (@{$INCLUDE_PATHS}) {
+    	printf ("    %s\n", $_);
+  	}
+}
+
+
+
+# ------------------------------------------------------------------------------
+# Fifth step: select between SIM and FPGA run
+
+my $opt = {
+			verbose => $VERBOSE,
+			clean => $CLEAN,
+			dry => $DRY,
+			tool_override => $TOOL,          
+			sim => {
+                    testcase => $TESTCASE_OPT,
+                    com => $COM_OPT,
+                    elab => 3,
+                    inter => $INTER_OPT,
+                    nodump => $NODUMP_OPT,
+                    wave => $WAVE_OPT,                                
+                    },
+            fpga => {
+                    syn => $SYN_OPT,
+                    par => $PAR_OPT,
+                    timing => $TIMING_OPT,                          
+                    }
+           }; 
+
+###
+
+if ($TOOL =~ m/XST/igm) {
+   	$ret = fpga_ise();
+}
+elsif ($TOOL =~ m/Vivado/igm) {
+	$ret = fpga_vivado();	
+}
+elsif ($TOOL =~ m/Quartus/igm) {
+	my $obj = Machet::Quartus->new({%{$data},  %{$opt} });
+	$ret = $obj->run;
+}
+elsif ($TOOL =~ m/icarus/igm) {
+	$ret = sim_icarus();
+}
+elsif ($TOOL =~ m/modelsim/igm) {
+	$ret = sim_modelsim();
+}
+elsif ($TOOL =~ m/ghdl/igm) {
+	$ret = sim_ghdl();
+}
+else {
+	print "ERROR: FPGA/SIM toolchain \"$TOOL\" not supported\n";
+	exit(-1);
+}
+
+
+exit($ret);
+
+
+
+
+######################################################################
+
+sub usage {
+    print "Version $VERSION\n";
+    pod2usage(-verbose=>2, -exitval=>2, -output=>\*STDOUT, -noperldoc=>1);
+    exit (1);
+}
+
+sub debug {
+    $Debug = 1;
+    #$Verilog::Getopt::Debug = 1;
+}
+
+sub parameter {
+    my $param = shift;
+    if ($param =~ /^--?/) {
+		die "%Error: machet: Unknown parameter: $param\n";
+    } else {
+		push @opt_files, "$param"; # Must quote to convert Getopt to string, bug298
+    }
+}
+
+
+# Perform clean operation
+sub clean_up {
+
+ 	# Directories to clean for SIM run
+	my @simDirs = ("/modelsim",
+                 "/icarus",
+                 "/ghdl");
+
+ 	# Directories to clean for FPGA run
+  	my @fpgaDirs = ("/xst",
+                  "/ngdbuild",
+                  "/map",
+                  "/par",
+                  "/trace",
+                  "/quartus");
+
+ 	my @dirs;                     # Directories to clean
+  	my $baseDir = "";             # Base directory, hemmingway@163.com
+  	my $currentDir;               # Current directory that is cleaned
+
+
+  	# Choose directories for clean
+  	if ($MODE eq "FPGA") {
+    	@dirs = @fpgaDirs;
+  	}
+  	elsif ($MODE eq "SIM") {
+    	@dirs = @simDirs;
+  	}
+
+
+  	print ">>> Cleaning compile results and intermediate files.\n";
+
+  	# Step through all FPGA directories and delete all file/directories in them
+  	foreach (@dirs) {
+    	# Build path, open directory and read all items
+    	$currentDir = $baseDir.$_;
+    	# Report
+    	if ($VERBOSE == 1) {
+      		print "  Cleaning ".$currentDir."\n";
+    	}
+
+		my $dir = path($currentDir);
+		my $iter = $dir->iterator;
+		while ( my $next = $iter->() ) {
+			# Item is directory
+    		if ($next->exists) {
+        		print "Delete ".$next."\n";
+				$next->remove_tree( { safe => 0 });
+      		}
+		}
+  	}
+}
+
+
+# Display a list of all testcases
+sub display_test_list {
+	my $testcases_dir;
+  	my $number = 0;
+
+
+  	print ">>> Displaying testcase list.\n";
+
+    # 需要修改， build testcases 目录
+  	$testcases_dir = "/../testcases";
+
+  	# Report
+  	if ($VERBOSE == 1) {
+    	print "  Testcase directory is \"".$testcases_dir."\"\n";
+  	}
+
+	my $dir = path($testcases_dir);
+	my $iter = $dir->iterator;
+	while ( my $next = $iter->() ) {
+		# Item is directory
+    	if ($next->is_dir) {
+        	$number++;
+        	print "    ".$number.":  \t".$next."\n";
+      	}
+	}
+}
+
+sub write_config_file() {
+  	my $filename = shift;
+
+my $group1 = { 
+        foo => { 
+                bar => 'group1 Hello World!' 
+                } 
+        };
+
+my $group2 = { 
+	 	# Indentation (tabs and/or spaces) is allowed but not required
+        server => { 
+                ip => '192.168.32.1',
+                dc => 'eqdc10', 
+                } 
+        };
+
+my $data = { %{$group1}, %{$group2} };
+
+my $toml = to_toml($data);
+print $toml;
+
+path($filename)->spew($toml);
+
+}
+
+
+
+######################################################################
+######################################################################
+######################################################################
+
+__END__
+
+=pod
+
+=head1 NAME
+
+machet - Digital design flow script collection
+
+=head1 SYNOPSIS
+
+  machet --help
+  machet [OPTION]... [FILE]...
+
+=head1 DESCRIPTION
+
+This tool reads a config file and creates all script files necessary for
+simulation or FPGA synthesis, depending on the current working directory.
+	
+=head1 GENERAL ARGUMENTS
+
+
+=over 4
+
+=item -h, --help
+
+Displays this message and program version and exits.
+
+=item  -v, --version
+
+Displays program version and exits.
+
+=item -f, --file <file_name>
+
+Used to specify a different config file. If this option is not used, 
+the default file \"machet.cfg\" will be used.
+
+=item --clean
+
+Deletes all compile results and intermediate files.
+
+=item -T, --tool <tool_chain>
+
+Overrides toolchain specified in config file with user selection.
+
+=item -V, --verbose
+
+Display more information.
+
+=item -D, --dry                  
+
+Performs dry run. Scripts are created but not started.
+
+=back
+
+=head1 MODELSIM RELATED ARGUMENTS
+  
+
+=over 4
+
+=item -c, --compile
+
+Compiles all source files for simulation using ModelSim VLOG or VCOM.
+
+=item -r, --run
+
+Starts ModelSim VSIM elaboration and simulation.
+
+=item -I, --inter
+
+Runs simulation in interactive (GUI) mode.Has only effect if \"--run\" is specified.
+
+=item -N, --nodump
+
+VSIM will not dump signal values to a waveform file. 
+Has only effect if simulation is run in non-interactive mode. \$dumpvars is not affected
+by this option.
+
+=item -W, --wave
+
+Starts ModelSim VSIM to diplay the waveform of a previous simulation.
+
+=item -L, --testlist
+
+Displays a list of testcases.
+
+=item -C, --testcase <tc_name>
+
+Selects testcase \"tc_name\".
+
+=back
+
+=head1 ICARUS VERILOG RELATED ARGUMENTS
+
+
+=over 4
+
+=item -c, --compile              
+
+Compiles all source files for simulation using IVERILOG.
+
+=item -r, --run
+
+Starts simulation.
+
+=item -N, --nodump               
+
+No value change dump is generated (i.e. \$dumpvars is ignored).
+
+=item -W, --wave                 
+
+Starts GTKWAVE to diplay the waveform of a previous simulation.
+
+=item -L, --testlist             
+
+Displays a list of testcases.
+
+=item -C, --testcase <tc_name>   
+
+Selects testcase \"tc_name\".
+
+=back
+
+=head1 GHDL RELATED ARGUMENTS
+
+
+=over 4
+
+=item -c, --compile              
+
+Compiles and elaborates all source files for simulation using GHDL.
+
+=item -r, --run                  
+
+Starts simulation.
+
+=item -N, --nodump               
+
+No waveform dump is generated
+
+=item -W, --wave                 
+
+Starts GTKWAVE to diplay the waveform of a previous simulation.
+
+=back
+
+=head1 XILINX FPGA RELATED ARGUMENTS
+
+
+=over 4
+
+=item -s, --synthesis            
+
+Creates script files for FPGA synthesis and runs Xilinx XST.
+
+=item -p, --par
+
+Creates script files for FPGA place and route and
+runs Xilinx NGDBUILD, MAP, PAR and BITGEN.
+
+=item -t, --timing
+
+Creates script files for FPGA timing analysis and runs Xilinx TRACE.
+
+=back
+
+=head1 ALTERA FPGA RELATED ARGUMENTS
+
+=over 4
+
+=item -s, --synthesis            
+
+Creates script files for FPGA synthesis and runs Altera QUARTUS_MAP.
+
+=item -p, --par                  
+
+Creates script files for FPGA place and route and 
+runs Altera QUARTUS_FIT and QUARTUS_ASM.
+
+=item -t, --timing               
+
+Creates script files for FPGA timing analysis and
+runs Altera QUARTUS_STA.
+
+=back
+
+=head1 DISTRIBUTION
+
+Copyright 2000-2017 by CPUxOS.  This package is free software; you
+can redistribute it and/or modify it under the terms of either the GNU
+Lesser General Public License Version 3 or the Perl Artistic License Version 2.0.
+
+=head1 AUTHORS
+
+Wang xingfeng <xingfeng@cpu_os.ac.cn>
+
+=head1 SEE ALSO
+
+L<Verilog-Perl>,
+L<Verilog::Getopt>,
+L<Verilog::Preproc>
+
+=cut
+######################################################################

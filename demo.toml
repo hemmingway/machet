@@ -1,0 +1,5 @@
+[foo]
+bar = "group1 Hello World!"
+[server]
+dc = "eqdc10"
+ip = "192.168.32.1"

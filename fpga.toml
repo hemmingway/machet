@@ -1,0 +1,114 @@
+# This is a TOML document. Boom.
+
+title = "Digital Disign Flow Example"
+
+[base]
+mode = "FPGA"			# SIM or FPGA
+name = "test"		#implementation name, used to name all scripts and compile results
+toolchain = "Altera Quartus"		# SIM: icarus, modelsim, ghdl. FPGA: XST, Quartus, Vivado
+top_level = "test_top"
+part = "ep3c16f484c6" 	# Example: xc4vfx12-ff668-10, xc3s200-ft256-4, ep3c16f484c6
+
+
+# May point to directories or file, relative to project base directory
+[paths]
+
+# common source paths
+source = [
+
+]
+
+
+# Source files that are used for FPGA implementation only
+fpga_source = [
+	"/home/nfs/work_fpga/div",
+]
+
+# include paths
+include = [
+
+]
+
+# fpga excluded paths/files
+fpga_excluded = [
+
+]
+
+
+[defines]
+# Global defines in Verilog syntax.
+verilog = [
+
+]
+
+
+# Defines used for FPGA implementation only
+fpga_verilog = [
+
+]
+
+
+
+# May point to files only, relative to project base directory
+[XST]
+# .xcf and .ucf files for synthesis part of Xilinx FPGA tools
+xilinx_syn_constraint_files = [
+
+]
+
+
+# .ucf files for place and route part of Xilinx FPGA tools
+xilinx_par_constraint_files = [
+
+]
+
+
+# Any option that XST understands
+xilinx_xst_options = [
+	"-rtlview yes",
+]
+
+# Any option that NGDBUILD understands
+xilinx_ngdbuild_options = [
+
+]
+
+
+# Any option that MAP understands
+xilinx_map_options = [
+
+]
+
+
+# Any option that PAR understands
+xilinx_par_options = [
+
+]
+
+
+# Any option that BITGEN understands
+xilinx_bitgen_options = [
+	"-g StartUpClk:JtagClk",
+]
+
+# Any option that TRCE understands
+xilinx_trace_options = [
+
+]
+
+[Quartus]
+# .tcl files for synthesis part of Altera FPGA tools
+# File content will be added to Altera project file
+# May point to files only, relative to project base directory
+altera_constraint_files = [
+
+]
+
+# .sdc files used by TimeQuest timing analyzer
+# May point to files only, relative to project base directory
+altera_sdc_files = [
+
+]
+
+
+
